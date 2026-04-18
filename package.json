@@ -1,14 +1,24 @@
 {
-  "name": "nuestrorave",
-  "version": "1.0.0",
-  "description": "Sala de videos privada para dos",
+  "name": "nuestrorave-server",
+  "version": "2.0.0",
+  "description": "NuestroRave Watch Party Server",
+  "main": "index.js",
   "scripts": {
-    "sync": "npx cap sync",
-    "open": "npx cap open android"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
-  "devDependencies": {
-    "@capacitor/cli": "^5.7.0",
-    "@capacitor/core": "^5.7.0",
-    "@capacitor/android": "^5.7.0"
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "cors": "^2.8.5",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.1",
+    "express-rate-limit": "^7.1.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
