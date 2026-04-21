@@ -21,9 +21,9 @@ const io = new Server(server, {
   maxHttpBufferSize: 10 * 1024 * 1024 // 10 MB (para imágenes de chat)
 });
 
-// ── YOUTUBE API KEY ───────────────────────────
-// Ponla en Railway como variable de entorno: YT_API_KEY
-const YT_API_KEY = process.env.YT_API_KEY || '';
+// ── API KEYS ──────────────────────────────────
+const YT_API_KEY   = process.env.YT_API_KEY   || '';
+const TMDB_API_KEY = process.env.TMDB_API_KEY || '';
 
 // ── BASE DE DATOS EN MEMORIA ──────────────────
 // (persiste mientras el servidor esté corriendo)
@@ -117,6 +117,105 @@ app.get('/search-yt', async (req, res) => {
 // ══════════════════════════════════════════════
 app.get('/', (_req, res) => res.json({ ok: true, status: 'NuestroRave server running 💕' }));
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// ══════════════════════════════════════════════
+//  REST — TMDB SEARCH (películas y series)
+// ══════════════════════════════════════════════
+app.get('/search-tmdb', async (req, res) => {
+  const { q, type } = req.query; // type: 'movie' | 'tv' | 'multi'
+  if (!q) return res.json({ results: [] });
+  if (!TMDB_API_KEY) return res.json({ results: [], error: 'Sin API key de TMDB' });
+  try {
+    const searchType = type || 'multi';
+    const url = `https://api.themoviedb.org/3/search/${searchType}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(q)}&language=es-ES&page=1`;
+    const r    = await fetch(url);
+    const data = await r.json();
+    const results = (data.results || []).slice(0, 15).map(item => ({
+      id        : item.id,
+      imdb_id   : item.imdb_id || null,
+      title     : item.title || item.name,
+      type      : item.media_type || type || 'movie',
+      year      : (item.release_date || item.first_air_date || '').substring(0, 4),
+      poster    : item.poster_path ? `https://image.tmdb.org/t/p/w200${item.poster_path}` : '',
+      overview  : item.overview || '',
+      rating    : item.vote_average || 0
+    }));
+    res.json({ results });
+  } catch (e) {
+    res.json({ results: [], error: e.message });
+  }
+});
+
+// ── Obtener IMDB ID de una película/serie ─────
+app.get('/tmdb-imdb', async (req, res) => {
+  const { id, type } = req.query;
+  if (!id || !TMDB_API_KEY) return res.json({ imdb_id: null });
+  try {
+    const url = `https://api.themoviedb.org/3/${type || 'movie'}/${id}/external_ids?api_key=${TMDB_API_KEY}`;
+    const r    = await fetch(url);
+    const data = await r.json();
+    res.json({ imdb_id: data.imdb_id || null });
+  } catch (e) {
+    res.json({ imdb_id: null });
+  }
+});
+
+// ── Obtener temporadas de una serie ───────────
+app.get('/tmdb-seasons', async (req, res) => {
+  const { id } = req.query;
+  if (!id || !TMDB_API_KEY) return res.json({ seasons: [] });
+  try {
+    const url = `https://api.themoviedb.org/3/tv/${id}?api_key=${TMDB_API_KEY}&language=es-ES`;
+    const r    = await fetch(url);
+    const data = await r.json();
+    const seasons = (data.seasons || [])
+      .filter(s => s.season_number > 0)
+      .map(s => ({ number: s.season_number, name: s.name, episodes: s.episode_count }));
+    res.json({ seasons, imdb_id: null });
+  } catch (e) {
+    res.json({ seasons: [] });
+  }
+});
+
+// ══════════════════════════════════════════════
+//  REST — VIDEO PROXY
+//  Permite cargar streams de sitios externos
+//  sin bloqueo de CORS
+// ══════════════════════════════════════════════
+app.get('/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('Missing url');
+
+  // Solo permitir URLs de sitios de video conocidos
+  const ALLOWED = [
+    'vidsrc.to', 'vidsrc.me', 'vidsrc.xyz', '2embed.cc',
+    'embedder.net', 'moviesapi.club', 'nontongo.cc',
+    'archive.org', 'cdn.pluto.tv'
+  ];
+  const isAllowed = ALLOWED.some(d => targetUrl.includes(d));
+  if (!isAllowed) return res.status(403).send('Domain not allowed');
+
+  try {
+    const r = await fetch(targetUrl, {
+      headers: {
+        'User-Agent'     : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept'         : '*/*',
+        'Referer'        : targetUrl,
+        'Origin'         : new URL(targetUrl).origin
+      }
+    });
+
+    // Pasar headers relevantes
+    const contentType = r.headers.get('content-type') || 'application/octet-stream';
+    res.set('Content-Type', contentType);
+    res.set('Access-Control-Allow-Origin', '*');
+
+    // Stream directo
+    r.body.pipe(res);
+  } catch (e) {
+    res.status(500).send('Proxy error: ' + e.message);
+  }
+});
 
 // ══════════════════════════════════════════════
 //  SOCKET.IO
